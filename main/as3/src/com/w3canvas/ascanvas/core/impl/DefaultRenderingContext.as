@@ -1,5 +1,6 @@
 package com.w3canvas.ascanvas.core.impl
 {
+    import com.w3canvas.ascanvas.core.CSSColor;
     import com.w3canvas.ascanvas.core.Canvas;
     import com.w3canvas.ascanvas.core.CanvasGradient;
     import com.w3canvas.ascanvas.core.CanvasPattern;
@@ -7,7 +8,7 @@ package com.w3canvas.ascanvas.core.impl
     import com.w3canvas.ascanvas.core.ImageData;
     import com.w3canvas.ascanvas.core.TextMetrics;
     import com.w3canvas.ascanvas.types.CanvasTypes;
-
+    
     import flash.display.Sprite;
     import flash.errors.IllegalOperationError;
     import flash.geom.Matrix;
@@ -64,13 +65,15 @@ package com.w3canvas.ascanvas.core.impl
          * Invalidate transform matrix.
          */
         protected function invalidateTransformMatrix():void
-        {
-            renderSprite.transform.matrix = transformMatrix.clone();
+        {; // Nothing for now
         }
 
-        private function invalidateActualStrokeStyle():void
-        {
-            _actualStrokeStyle = null;
+        private function invalidateStrokeStyle():void
+        {; // Nothing for now
+        }
+
+        private function invalidateFillStyle():void
+        {; // Nothing for now
         }
 
         //--------------------------------------------------------------------------
@@ -189,8 +192,7 @@ package com.w3canvas.ascanvas.core.impl
         //  stroke style
         //----------------------------------
 
-        private var _strokeStyle:* = "#000000";
-        private var _actualStrokeStyle:* = SolidColor.BLACK;
+        private var _strokeStyle:* = CSSColor.BLACK;
 
         public function get strokeStyle():*
         {
@@ -199,22 +201,49 @@ package com.w3canvas.ascanvas.core.impl
 
         public function set strokeStyle(value:*):void
         {
-            _strokeStyle = value;
-            invalidateActualStrokeStyle();
+            if (value is CanvasPattern || value is CanvasGradient)
+            {
+                _strokeStyle = value;
+                invalidateStrokeStyle();
+            }
+            else if (value is String)
+            {
+                var parsed:CSSColor = CSSColor.from(value);
+                if (parsed)
+                {
+                    _strokeStyle = parsed;
+                    invalidateStrokeStyle();
+                }
+            }
         }
 
         //----------------------------------
         //  fill style
         //----------------------------------
 
+        private var _fillStyle:* = CSSColor.BLACK;
+
         public function get fillStyle():*
         {
-            return null;
+            return _fillStyle;
         }
 
         public function set fillStyle(value:*):void
         {
-            throw new IllegalOperationError("not implemented");
+            if (value is CanvasPattern || value is CanvasGradient)
+            {
+                _fillStyle = value;
+                invalidateFillStyle();
+            }
+            else if (value is String)
+            {
+                var parsed:CSSColor = CSSColor.from(value);
+                if (parsed)
+                {
+                    _fillStyle = parsed;
+                    invalidateFillStyle();
+                }
+            }
         }
 
         //----------------------------------
@@ -223,11 +252,13 @@ package com.w3canvas.ascanvas.core.impl
 
         public function createLinearGradient(x0:Number, y0:Number, x1:Number, y1:Number):CanvasGradient
         {
+            //TODO!
             throw new IllegalOperationError("not implemented");
         }
 
         public function createRadialGradient(x0:Number, y0:Number, r0:Number, x1:Number, y1:Number, r1:Number):CanvasGradient
         {
+            //TODO!
             throw new IllegalOperationError("not implemented");
         }
 
@@ -237,6 +268,7 @@ package com.w3canvas.ascanvas.core.impl
 
         public function createPattern(image:*, repetition:String):CanvasPattern
         {
+            //TODO!
             throw new IllegalOperationError("not implemented");
         }
 
@@ -253,7 +285,10 @@ package com.w3canvas.ascanvas.core.impl
 
         public function set lineWidth(value:Number):void
         {
-            _lineWidth = value;
+            if (!isNaN(value))
+            {
+                _lineWidth = value;
+            }
         }
 
         //----------------------------------
@@ -270,61 +305,103 @@ package com.w3canvas.ascanvas.core.impl
         public function set lineCap(value:String):void
         {
             if (CanvasTypes.LINE_CAPS.contains(value))
+            {
                 _lineCap = value;
+            }
         }
 
         //----------------------------------
         //  line join
         //----------------------------------
 
+        private var _lineJoin:String = CanvasTypes.LINE_JOINS.defaultValue;
+
         public function get lineJoin():String
         {
-            return null;
+            return _lineJoin;
         }
 
         public function set lineJoin(value:String):void
         {
+            if (CanvasTypes.LINE_JOINS.contains(value))
+            {
+                _lineJoin = value;
+            }
         }
+
+        //----------------------------------
+        //  miters
+        //----------------------------------
+
+        private var _miterLimit:Number = 10;
 
         public function get miterLimit():Number
         {
-            return 0;
+            return _miterLimit;
         }
 
         public function set miterLimit(value:Number):void
         {
+            if (!isNaN(value))
+            {
+                _miterLimit = value;
+            }
         }
 
+        //----------------------------------
+        //  Shadows
+        //----------------------------------
+
+        private var _shadowOffsetX:Number = 0;
+        
         public function get shadowOffsetX():Number
         {
-            return 0;
+            return _shadowOffsetX;
         }
 
         public function set shadowOffsetX(value:Number):void
         {
+            if (!isNaN(value))
+            {
+                _shadowOffsetX = value;
+            }
         }
 
+        private var _shadowOffsetY:Number = 0;
+        
         public function get shadowOffsetY():Number
         {
-            return 0;
+            return _shadowOffsetY;
         }
 
         public function set shadowOffsetY(value:Number):void
         {
+            if (!isNaN(value))
+            {
+                _shadowOffsetY = value;
+            }
         }
+        
+        private var _shadowBlur:Number = 0;
 
         public function get shadowBlur():Number
         {
-            return 0;
+            return _shadowBlur;
         }
 
         public function set shadowBlur(value:Number):void
         {
+            if (!isNaN(value))
+            {
+                _shadowBlur = value;
+            }
         }
 
+        private var _shadowColor:CSSColor = CSSColor.TRANSPARENT_BLACK;
+        
         public function get shadowColor():String
         {
-            return null;
+            return _shadowColor.toString();
         }
 
         public function set shadowColor(value:String):void
