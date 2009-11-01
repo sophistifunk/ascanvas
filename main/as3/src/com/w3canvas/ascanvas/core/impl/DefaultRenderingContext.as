@@ -9,6 +9,13 @@ package com.w3canvas.ascanvas.core.impl
     import com.w3canvas.ascanvas.core.TextMetrics;
     import com.w3canvas.ascanvas.types.CanvasTypes;
     
+    import flash.display.Bitmap;
+    import flash.display.BitmapData;
+    import flash.display.CapsStyle;
+    import flash.display.DisplayObject;
+    import flash.display.Graphics;
+    import flash.display.JointStyle;
+    import flash.display.Shape;
     import flash.display.Sprite;
     import flash.errors.IllegalOperationError;
     import flash.geom.Matrix;
@@ -26,6 +33,9 @@ package com.w3canvas.ascanvas.core.impl
         {
             _canvas = canvas;
             _self = owner; //TODO: Add RenderingContextProxy support
+
+            canvasBitmap = new Bitmap();
+            bufferSprite = new Sprite();
         }
 
         //--------------------------------------------------------------------------
@@ -33,6 +43,23 @@ package com.w3canvas.ascanvas.core.impl
         //  Internals
         //
         //--------------------------------------------------------------------------
+
+        //----------------------------------
+        //  Main child sprite
+        //----------------------------------
+
+        private var canvasBitmap:Bitmap;
+
+        public function get displayObject():DisplayObject
+        {
+            return canvasBitmap;
+        }
+
+        //----------------------------------
+        //  Buffer sprite
+        //----------------------------------
+
+        private var bufferSprite:Sprite;
 
         //----------------------------------
         //  owning canvas
@@ -225,7 +252,7 @@ package com.w3canvas.ascanvas.core.impl
 
         public function get fillStyle():*
         {
-            return _fillStyle;
+            return _fillStyle.toString();
         }
 
         public function set fillStyle(value:*):void
@@ -353,7 +380,7 @@ package com.w3canvas.ascanvas.core.impl
         //----------------------------------
 
         private var _shadowOffsetX:Number = 0;
-        
+
         public function get shadowOffsetX():Number
         {
             return _shadowOffsetX;
@@ -368,7 +395,7 @@ package com.w3canvas.ascanvas.core.impl
         }
 
         private var _shadowOffsetY:Number = 0;
-        
+
         public function get shadowOffsetY():Number
         {
             return _shadowOffsetY;
@@ -381,7 +408,7 @@ package com.w3canvas.ascanvas.core.impl
                 _shadowOffsetY = value;
             }
         }
-        
+
         private var _shadowBlur:Number = 0;
 
         public function get shadowBlur():Number
@@ -398,7 +425,7 @@ package com.w3canvas.ascanvas.core.impl
         }
 
         private var _shadowColor:CSSColor = CSSColor.TRANSPARENT_BLACK;
-        
+
         public function get shadowColor():String
         {
             return _shadowColor.toString();
@@ -406,18 +433,39 @@ package com.w3canvas.ascanvas.core.impl
 
         public function set shadowColor(value:String):void
         {
+            var c:CSSColor = CSSColor.from(value);
+
+            if (c)
+                _shadowColor = c;
         }
+
+        //----------------------------------
+        //  Drawing
+        //----------------------------------
 
         public function clearRect(x:Number, y:Number, w:Number, h:Number):void
         {
+            //TODO! -- This will require some voodoo :)
+            throw new IllegalOperationError("not implemented");
         }
 
         public function fillRect(x:Number, y:Number, w:Number, h:Number):void
         {
+            var rect:Shape = new Shape();
+            setFillStyleOf(rect.graphics);
+            rect.graphics.drawRect(x, y, w, h);
+            rect.graphics.endFill();
+            canvasBitmap.bitmapData.draw(rect, transformMatrix, null, null);
         }
 
         public function strokeRect(x:Number, y:Number, w:Number, h:Number):void
         {
+            var rect:Shape = new Shape();
+            setLineStyleOf(rect.graphics);
+            rect.graphics.drawRect(x, y, w, h);
+            rect.graphics.endFill();
+            canvasBitmap.bitmapData.draw(rect, transformMatrix, null, null); // ,state.clipping);
+            flush();
         }
 
         public function beginPath():void
@@ -529,6 +577,112 @@ package com.w3canvas.ascanvas.core.impl
 
         public function putImageData(imagedata:ImageData, dx:Number, dy:Number, ... rest):void
         {
+        }
+
+        //--------------------------------------------------------------------------
+        //
+        //  Moved from original codebase
+        //
+        //--------------------------------------------------------------------------
+
+        private function setFillStyleOf(bufferContext:Graphics):void
+        {
+            bufferContext.lineStyle(undefined);
+
+            var fillResource;
+
+            if (_fillStyle is CSSColor)
+            {
+                bufferContext.beginFill(_fillStyle.color, _fillStyle.alpha);
+                return;
+            }
+//            else if (_fillStyle is LinearGradient)
+//            {
+//                var s2 = LinearGradient(fillResource);
+//                bufferContext.beginGradientFill(GradientType.LINEAR, s2.colors, s2.alphas, s2.ratios, s2.matrix, s2.spreadMethod, s2.interpolationMethod, s2.focalPointRatio);
+//            }
+//            else if (_fillStyle is RadialGradient)
+//            {
+//                var s3 = RadialGradient(fillResource);
+//                bufferContext.beginGradientFill(GradientType.RADIAL, s3.colors, s3.alphas, s3.ratios, s3.matrix, s3.spreadMethod, s3.interpolationMethod, s3.focalPointRatio);
+//            }
+//            else if (_fillStyle is CanvasPattern)
+//            {
+//                var s4 = CanvasPattern(fillResource);
+//                bufferContext.beginBitmapFill(s4.patternFill);
+//            }
+
+            // TODO!
+            throw new IllegalOperationError("not implemented");
+        }
+
+        private function setLineStyleOf(bufferContext:Graphics, pixelHinting:Boolean=true):void
+        {
+            var _lineJoin:String, _lineCap:String;
+
+            if (lineJoin == 'round')
+                _lineJoin = JointStyle.ROUND;
+            else if (lineJoin == 'bevel')
+                _lineJoin = JointStyle.BEVEL;
+            else
+                _lineJoin = JointStyle.MITER;
+
+            if (lineCap == 'square')
+                _lineCap = CapsStyle.SQUARE;
+            else if (lineCap == 'round')
+                _lineCap = CapsStyle.ROUND;
+            else
+                _lineCap = CapsStyle.NONE;
+
+            if (_strokeStyle is CSSColor)
+            {
+                bufferContext.lineStyle(lineWidth, _strokeStyle.color, _strokeStyle.alpha, pixelHinting, "normal", _lineCap, _lineJoin, miterLimit);
+                return;
+            }
+//            else if (_strokeStyle is LinearGradient)
+//            {
+//                var s2:* = LinearGradient(strokeResource);
+//                bufferContext.lineGradientStyle(GradientType.LINEAR, s2.colors, s2.alphas, s2.ratios, s2.matrix, s2.spreadMethod, s2.interpolationMethod, s2.focalPointRatio);
+//            }
+//            else if (_strokeStyle is RadialGradient)
+//            {
+//                var s3:* = RadialGradient(strokeResource);
+//                bufferContext.lineGradientStyle(GradientType.RADIAL, s3.colors, s3.alphas, s3.ratios, s3.matrix, s3.spreadMethod, s3.interpolationMethod, s3.focalPointRatio);
+//            }
+//            else if (_strokeStyle is CanvasPattern)
+//            {
+//                //				bufferContext.lineBitmapStyle( CanvasPattern(strokeResource), null, true, false); // Flash 10
+//                //				bufferContext.beginBitmapFill(s4.patternFill);
+//            }
+
+            // TODO!
+            throw new IllegalOperationError("not implemented");
+        }
+
+        private function flush():void
+        {
+            if (globalCompositeOperation == 'source-over')
+                canvasBitmap.bitmapData.draw(bufferSprite);
+            else
+                compositeFlush();
+
+            while (bufferSprite.numChildren)
+                bufferSprite.removeChildAt(0);
+
+            bufferSprite.graphics.clear();
+        }
+
+        private function compositeFlush():void
+        {
+            // TODO!
+            throw new IllegalOperationError("not implemented");
+            
+//            var b:BitmapData = new BitmapData(canvasBitmap.bitmapData.width, canvasBitmap.bitmapData.height, true, 0x00000000);
+//            b.draw(bufferSprite);
+//            var compositerFactory = new CanvasCompositing();
+//            var compositer:ICompositer = compositerFactory.GetCompositer('flashLogic');
+//            var output:BitmapData = compositer.CompositeBitmap(state.globalCompositeOperation, canvasData, b);
+//            canvasBitmap.bitmapData.copyPixels(output, new Rectangle(0, 0, canvasBitmap.bitmapData.width, canvasBitmap.bitmapData.height), new Point(0, 0));
         }
     }
 }
