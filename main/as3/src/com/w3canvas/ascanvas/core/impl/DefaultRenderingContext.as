@@ -10,7 +10,6 @@ package com.w3canvas.ascanvas.core.impl
     import com.w3canvas.ascanvas.types.CanvasTypes;
     
     import flash.display.Bitmap;
-    import flash.display.BitmapData;
     import flash.display.CapsStyle;
     import flash.display.DisplayObject;
     import flash.display.Graphics;
@@ -37,6 +36,21 @@ package com.w3canvas.ascanvas.core.impl
             canvasBitmap = new Bitmap();
             bufferSprite = new Sprite();
         }
+
+        //--------------------------------------------------------------------------
+        //
+        //  Consts
+        //
+        //--------------------------------------------------------------------------
+
+        //TODO: Refactor out to another class
+
+        public static const NO_OP:Number = 0;
+        public static const MOVE_TO:Number = 1;
+        public static const LINE_TO:Number = 2;
+        public static const CURVE_TO:Number = 3;
+        public static const WIDE_MOVE_TO:Number = 4;
+        public static const WIDE_LINE_TO:Number = 5;
 
         //--------------------------------------------------------------------------
         //
@@ -78,11 +92,19 @@ package com.w3canvas.ascanvas.core.impl
             return _self == null ? this : _self;
         }
 
+//        //----------------------------------
+//        //  sprite
+//        //----------------------------------
+//
+//        protected var renderSprite:Sprite = new Sprite();
+
         //----------------------------------
-        //  sprite
+        //  Path data
         //----------------------------------
 
-        protected var renderSprite:Sprite = new Sprite();
+        private var data:Array = [];
+        private var commands:Array = [];
+        private var points:Array = [];
 
         //----------------------------------
         //  validation / invalidation
@@ -470,30 +492,279 @@ package com.w3canvas.ascanvas.core.impl
 
         public function beginPath():void
         {
+            commands = [];
+            data = [];
+            points = [];
         }
 
         public function closePath():void
         {
+            if (points.length == 0)
+                return;
+
+            moveTo(cpx, cpy);
         }
 
         public function moveTo(x:Number, y:Number):void
         {
+            var p:Point = new Point(x, y);
+            points = [p];
+
+            if (useTransform)
+                p = transformMatrix.transformPoint(p);
+
+            data.push(p.x);
+            data.push(p.y);
+            commands.push(MOVE_TO);
         }
 
         public function lineTo(x:Number, y:Number):void
         {
+            if (!points.length)
+                return;
+
+            var p:Point = new Point(x, y);
+            points.push(p);
+
+            if (useTransform)
+                p = transformMatrix.transformPoint(p);
+
+            data.push(p.x);
+            data.push(p.y);
+            commands.push(LINE_TO);
         }
 
-        public function quadraticCurveTo(cpx:Number, cpy:Number, x:Number, y:Number):void
+        public function quadraticCurveTo(cp1x:Number, cp1y:Number, x:Number, y:Number):void
         {
+
+            if (!points.length)
+                return;
+
+            if (useTransformSkew)
+            {
+                // Convert quadratic to cubic bezier -- is this unnecessary?
+                var cp0:Point = new Point(cpx, cpy);
+                var cp1:Point = new Point(cpx + (2 / 3 * (cp1x - cpx)), cpy + (2 / 3 * (cp1y - cpy)));
+                var cp2:Point = new Point(cp1.x + (1 / 3 * (x - cpx)), cp1.y + (1 / 3 * (y - cpy)));
+                var cp3:Point = new Point(x, y);
+                bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, x, y);
+                return;
+            }
+            if (useTransform)
+            {
+                var p:Point = transformMatrix.transformPoint(new Point(cp1x, cp1y));
+                cp1x = p.x;
+                cp1y = p.y;
+                p = transformMatrix.transformPoint(new Point(x, y));
+                x = p.x;
+                y = p.y;
+            };
+            data.push(cp1x);
+            data.push(cp1y);
+            data.push(x);
+            data.push(y);
+            commands.push(CURVE_TO);
         }
 
         public function bezierCurveTo(cp1x:Number, cp1y:Number, cp2x:Number, cp2y:Number, x:Number, y:Number):void
         {
+            var P0:Point = new Point(cpx, cpy);
+            var P1:Point = new Point(cp1x, cp1y);
+            var P2:Point = new Point(cp2x, cp2y);
+            var P3:Point = new Point(x, y);
+
+            if (useTransform)
+            {
+                P0 = transformMatrix.transformPoint(P0);
+                P1 = transformMatrix.transformPoint(P1);
+                P2 = transformMatrix.transformPoint(P2);
+                P3 = transformMatrix.transformPoint(P3);
+            }
+
+            drawCubicBezier_midpoint(P0, P1, P2, P3);
         }
+
+        // Pulled from the C# codebase
 
         public function arcTo(x1:Number, y1:Number, x2:Number, y2:Number, radius:Number):void
         {
+            if (points.length == 0)
+                return;
+
+            if (radius < 0)
+                throw new IllegalOperationError("Radius < 0");
+
+            var x0:Number = cpx;
+            var y0:Number = cpy;
+
+            var p:Point;
+
+            if (useTransform)
+            {
+                p = transformMatrix.transformPoint(new Point(x1, y1));
+                x1 = p.x;
+                y1 = p.y;
+
+                p = transformMatrix.transformPoint(new Point(x2, y2));
+                x2 = p.x;
+                y2 = p.y;
+            }
+
+            if (radius == 0 || (x0 == x1 && y0 == y1) || (x1 == x2 && y1 == y2))
+            {
+                moveTo(x1, y1);
+                lineTo(x0, y0);
+                return;
+            }
+
+            //find angle between two lines (p0, p1) and (p1, p2)
+            var v01:Point = new Point(x0 - x1, y0 - y1);
+            var v12:Point = new Point(x2 - x1, y2 - y1);
+
+            var cosA:Number = ((v01.x * v12.x + v01.y * v12.y) / (Math.sqrt(Math.pow(v01.x, 2) + Math.pow(v01.y, 2)) * Math.sqrt(Math.pow(v12.x, 2) + Math.pow(v12.y, 2))));
+            var a:Number = Math.acos(cosA);
+
+            if (Math.abs(a - Math.PI) < 0.00001 || a == 0)
+            {
+                //all three points are on the straight line
+                moveTo(x1, y1);
+                lineTo(x0, y0);
+                return;
+            }
+
+            //find distance from point p1(x1, y1) to intersection with circle (arc)
+            var d:Number = radius / Math.tan(a / 2);
+
+            //tangent point of the line (p0, p1)
+            var t01:Point = findTangentPoint(x1, y1, x0, y0, d);
+            var t12:Point = findTangentPoint(x1, y1, x2, y2, d);
+            lineTo(t01.x, t01.y);
+
+            drawArcBetweenTwoPoints(t01.x, t01.y, t12.x, t12.y, radius, Math.PI - a);
+            //from point (x0, y0) to t01            
+            moveTo(t12.x, t12.y);
+        }
+
+        // Pulled from the C# codebase
+
+        private function findTangentPoint(x1:Number, y1:Number, x0:Number, y0:Number, d:Number):Point
+        {
+            //find point on line (p0, p1) on distance d from point p
+            var dx:Number = d * Math.abs(x0 - x1) / distanceBetween(new Point(x0, y0), new Point(x1, y1));
+            var x:Number;
+            if (x0 < x1)
+            {
+                //means x0 left from x1
+                x = x1 - dx;
+            }
+            else //means x0 right from x1
+            {
+                x = x1 + dx;
+            }
+            var y:Number;
+            var dy:Number = d * Math.abs(y0 - y1) / distanceBetween(new Point(x0, y0), new Point(x1, y1));
+            if (y0 < y1)
+            {
+                //means y0 uppper y1
+                y = y1 - dy;
+            }
+            else
+            {
+                //means y0 down y1
+                y = y1 + dy;
+            }
+            return new Point(x, y);
+        }
+
+        // Pulled from the C# codebase
+
+        private function drawArcBetweenTwoPoints(x1:Number, y1:Number, x2:Number, y2:Number, radius:Number, sweepAngle:Number):void
+        {
+            //define coordinates of center of circle
+            //length of chord
+            var l:Number = Math.sqrt(Math.pow((x1 - x2), 2) + Math.pow((y1 - y2), 2));
+            //distance between chord and center of circle
+            var d:Number = Math.sqrt(Math.abs(radius * radius - l * l / 4));
+            var x:Number = (x1 + x2) / 2;
+            var y:Number = (y1 + y2) / 2;
+            //find coordinates of circle's center
+            var rX:Number = x + d * (y1 - y2) / l;
+            var rY:Number = y + d * (x2 - x1) / l;
+            //find angles
+            var a1:Number = Math.asin((Math.abs(y1 - rY) / radius));
+            var a2:Number = Math.asin((Math.abs(y2 - rY) / radius));
+            //adjust angles
+            a1 = adjustAngle(a1, x1, y1, rX, rY);
+            a2 = adjustAngle(a2, x2, y2, rX, rY);
+            var sector1:Number = getSectorNumber(x1, y1, rX, rY);
+            var sector2:Number = getSectorNumber(x2, y2, rX, rY);
+            var sectorDifference:Number = Math.abs(sector1 - sector2);
+            var a:Number;
+            if (sectorDifference <= 1) //if angles in the same or in neighborhood sectors
+            {
+                //draw from min angle to max angle. a1 should be min angle
+                if (a1 > a2)
+                {
+                    a = a1;
+                    a1 = a2;
+                    a2 = a;
+                }
+            }
+            else
+            {
+                //draw from max angle to min angle. a1 should be max angle
+                if (a1 < a2)
+                {
+                    a = a1;
+                    a1 = a2;
+                    a2 = a;
+                }
+            }
+
+            throw new IllegalOperationError("Not implemented yet");
+
+            //TODO: Implement using code from Degrafa.
+
+            // .net code below
+            // Params: http://msdn.microsoft.com/en-us/library/ms142028.aspx
+
+//            surface.DrawArc(_stroke, (float)(rX - radius), (float)(rY - radius), (float)radius * 2,
+//                (float)radius * 2,
+//                (float)ConvertRadiansToDegrees(a1),
+//                (float)ConvertRadiansToDegrees(sweepAngle));
+        }
+
+        // Pulled from the C# codebase
+
+        private function adjustAngle(a:Number, x:Number, y:Number, rX:Number, rY:Number):Number
+        {
+            switch (getSectorNumber(x, y, rX, rY))
+            {
+                case 0:
+                    return Math.PI * 2 - a;
+                case 1:
+                    return Math.PI + a;
+                case 2:
+                    return Math.PI - a;
+                case 3:
+                    return a;
+            }
+            return a;
+        }
+
+        // Pulled from the C# codebase
+
+        private function getSectorNumber(x:Number, y:Number, rX:Number, rY:Number):Number
+        {
+            if (x >= rX && y < rY)
+                return 0;
+            if (x < rX && y <= rY)
+                return 1;
+            if (x <= rX && y > rY)
+                return 2;
+            if (x > rX && y >= rY)
+                return 3;
+            throw new IllegalOperationError("Invalid coordinates");
         }
 
         public function rect(x:Number, y:Number, w:Number, h:Number):void
@@ -581,21 +852,106 @@ package com.w3canvas.ascanvas.core.impl
 
         //--------------------------------------------------------------------------
         //
+        //  Helpers.
+        //
+        //--------------------------------------------------------------------------
+
+        //TODO: Factor out
+
+        private function distanceBetween(p1:Point, p2:Point):Number
+        {
+            return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+        }
+
+        //--------------------------------------------------------------------------
+        //
         //  Moved from original codebase
         //
         //--------------------------------------------------------------------------
 
+        private function drawCubicBezier_midpoint(P0:Point, P1:Point, P2:Point, P3:Point):void
+        {
+
+            // calculates the useful base points
+            var PA:Point = getPointOnSegment(P0, P1, 3 / 4);
+            var PB:Point = getPointOnSegment(P3, P2, 3 / 4);
+
+            // get 1/16 of the [P3, P0] segment
+            var dx:Number = (P3.x - P0.x) / 16;
+            var dy:Number = (P3.y - P0.y) / 16;
+
+            // calculates control point 1
+            var Pc_1:Point = getPointOnSegment(P0, P1, 3 / 8);
+
+            // calculates control point 2
+            var Pc_2:Point = getPointOnSegment(PA, PB, 3 / 8);
+            Pc_2.x -= dx;
+            Pc_2.y -= dy;
+
+            // calculates control point 3
+            var Pc_3:Point = getPointOnSegment(PB, PA, 3 / 8);
+            Pc_3.x += dx;
+            Pc_3.y += dy;
+
+            // calculates control point 4
+            var Pc_4:Point = getPointOnSegment(P3, P2, 3 / 8);
+
+            // calculates the 3 anchor points
+            var Pa_1:Point = getMiddle(Pc_1, Pc_2);
+            var Pa_2:Point = getMiddle(PA, PB);
+            var Pa_3:Point = getMiddle(Pc_3, Pc_4);
+
+            // draw the four quadratic subsegments
+            bufferSprite.graphics.curveTo(Pc_1.x, Pc_1.y, Pa_1.x, Pa_1.y);
+            bufferSprite.graphics.curveTo(Pc_2.x, Pc_2.y, Pa_2.x, Pa_2.y);
+            bufferSprite.graphics.curveTo(Pc_3.x, Pc_3.y, Pa_3.x, Pa_3.y);
+            bufferSprite.graphics.curveTo(Pc_4.x, Pc_4.y, P3.x, P3.y);
+        }
+
+        private function getPointOnSegment(P0:Point, P1:Point, ratio:Number):Point
+        {
+            return new Point((P0.x + ((P1.x - P0.x) * ratio)), (P0.y + ((P1.y - P0.y) * ratio)));
+        }
+
+        private function getMiddle(P0:Point, P1:Point):Point
+        {
+            return getPointOnSegment(P0, P1, .5); // Multiplication and addition are faster than division	
+            // return new Point(((P0.x + P1.x) / 2),((P0.y + P1.y) / 2));
+        }
+
+        private function get useTransformSkew():Boolean
+        {
+            return transformMatrix && (transformMatrix.b != transformMatrix.c);
+        }
+
+        private function get useTransform():Boolean
+        {
+            return (transformMatrix.a != 1 || transformMatrix.d != 1 || (transformMatrix.b + transformMatrix.c + transformMatrix.tx + transformMatrix.ty) != 0);
+        }
+
+        private function get cpx():Number
+        {
+            return data.length > 1 ? data[data.length - 2] : 0;
+        }
+
+        private function get cpy():Number
+        {
+            return data.length > 1 ? data[data.length - 1] : 0;
+        }
+
         private function setFillStyleOf(bufferContext:Graphics):void
         {
             bufferContext.lineStyle(undefined);
-
-            var fillResource;
 
             if (_fillStyle is CSSColor)
             {
                 bufferContext.beginFill(_fillStyle.color, _fillStyle.alpha);
                 return;
             }
+
+            // TODO!
+            throw new IllegalOperationError("not implemented");
+
 //            else if (_fillStyle is LinearGradient)
 //            {
 //                var s2 = LinearGradient(fillResource);
@@ -611,9 +967,6 @@ package com.w3canvas.ascanvas.core.impl
 //                var s4 = CanvasPattern(fillResource);
 //                bufferContext.beginBitmapFill(s4.patternFill);
 //            }
-
-            // TODO!
-            throw new IllegalOperationError("not implemented");
         }
 
         private function setLineStyleOf(bufferContext:Graphics, pixelHinting:Boolean=true):void
@@ -639,6 +992,10 @@ package com.w3canvas.ascanvas.core.impl
                 bufferContext.lineStyle(lineWidth, _strokeStyle.color, _strokeStyle.alpha, pixelHinting, "normal", _lineCap, _lineJoin, miterLimit);
                 return;
             }
+
+            // TODO!
+            throw new IllegalOperationError("not implemented");
+
 //            else if (_strokeStyle is LinearGradient)
 //            {
 //                var s2:* = LinearGradient(strokeResource);
@@ -654,9 +1011,6 @@ package com.w3canvas.ascanvas.core.impl
 //                //				bufferContext.lineBitmapStyle( CanvasPattern(strokeResource), null, true, false); // Flash 10
 //                //				bufferContext.beginBitmapFill(s4.patternFill);
 //            }
-
-            // TODO!
-            throw new IllegalOperationError("not implemented");
         }
 
         private function flush():void
@@ -676,7 +1030,7 @@ package com.w3canvas.ascanvas.core.impl
         {
             // TODO!
             throw new IllegalOperationError("not implemented");
-            
+
 //            var b:BitmapData = new BitmapData(canvasBitmap.bitmapData.width, canvasBitmap.bitmapData.height, true, 0x00000000);
 //            b.draw(bufferSprite);
 //            var compositerFactory = new CanvasCompositing();
