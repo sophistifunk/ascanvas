@@ -8,7 +8,7 @@ package com.w3canvas.ascanvas.core.impl
     import com.w3canvas.ascanvas.core.ImageData;
     import com.w3canvas.ascanvas.core.TextMetrics;
     import com.w3canvas.ascanvas.types.CanvasTypes;
-    
+
     import flash.display.Bitmap;
     import flash.display.CapsStyle;
     import flash.display.DisplayObject;
@@ -102,9 +102,9 @@ package com.w3canvas.ascanvas.core.impl
         //  Path data
         //----------------------------------
 
-        private var data:Array = [];
-        private var commands:Array = [];
-        private var points:Array = [];
+        private var data:Vector.<Number> = new Vector.<Number>();
+        private var commands:Vector.<int> = new Vector.<int>();
+        private var points:Vector.<Point> = new Vector.<Point>();
 
         //----------------------------------
         //  validation / invalidation
@@ -492,9 +492,9 @@ package com.w3canvas.ascanvas.core.impl
 
         public function beginPath():void
         {
-            commands = [];
-            data = [];
-            points = [];
+            commands = new Vector.<int>();
+            data = new Vector.<Number>();
+            points = new Vector.<Point>();
         }
 
         public function closePath():void
@@ -508,7 +508,8 @@ package com.w3canvas.ascanvas.core.impl
         public function moveTo(x:Number, y:Number):void
         {
             var p:Point = new Point(x, y);
-            points = [p];
+            points = new Vector.<Point>();
+            points.push(p);
 
             if (useTransform)
                 p = transformMatrix.transformPoint(p);
@@ -769,18 +770,98 @@ package com.w3canvas.ascanvas.core.impl
 
         public function rect(x:Number, y:Number, w:Number, h:Number):void
         {
+            moveTo(x, y);
+            lineTo(x + w, y);
+            lineTo(x + w, y + h);
+            lineTo(x, y + h);
+            lineTo(x, y);
+            closePath();
+            beginPath();
+            moveTo(x, y);
         }
 
-        public function arc(x:Number, y:Number, radius:Number, startAngle:Number, endAngle:Number, anticlockwise:Boolean):void
+        public function arc(cx:Number, cy:Number, radius:Number, startAngle:Number, endAngle:Number, anticlockwise:Boolean):void
         {
+
+            //	FIXME: Why are these being converted to degrees?
+            startAngle = radianToDegree(startAngle);
+            endAngle = radianToDegree(endAngle);
+            //		FIXME: Throw error, per spec
+            //		if(startAngle<0)startAngle = 360+startAngle;
+            if (endAngle < 0)
+                endAngle = 360 + endAngle;
+
+            var arc:Number;
+            if (anticlockwise)
+            {
+                arc = endAngle - startAngle;
+            }
+            else
+            {
+                arc = 360 - (endAngle - startAngle);
+                if (arc == 0 && endAngle != startAngle)
+                    arc = 360;
+            }
+
+            if (Math.abs(arc) > 360)
+                arc = 360;
+
+            var segs:Number = Math.ceil(Math.abs(arc) / 45);
+            var segAngle:Number = arc / segs;
+
+            var theta:Number, angle:Number;
+            if (anticlockwise)
+            {
+                theta = (segAngle / 180) * Math.PI;
+                angle = (startAngle / 180) * Math.PI;
+            }
+            else
+            {
+                theta = -(segAngle / 180) * Math.PI;
+                angle = (startAngle / 180) * Math.PI;
+            }
+
+            var sx:Number = cx + Math.cos(angle) * radius;
+            var sy:Number = cy + Math.sin(angle) * radius;
+
+            if (isNaN(cpx))
+            {
+                moveTo(sx, sy);
+            }
+            else
+            {
+                lineTo(sx, sy);
+            }
+
+            var angleMid:Number, bx:Number, by:Number, ctlx:Number, ctly:Number;
+            for (var i:int = 0; i < segs; i++)
+            {
+                angle += theta;
+                angleMid = angle - (theta / 2);
+                bx = cx + Math.cos(angle) * radius;
+                by = cy + Math.sin(angle) * radius;
+                ctlx = cx + Math.cos(angleMid) * (radius / Math.cos(theta / 2));
+                ctly = cy + Math.sin(angleMid) * (radius / Math.cos(theta / 2));
+                quadraticCurveTo(ctlx, ctly, bx, by);
+            }
         }
 
         public function fill():void
         {
+            setFillStyleOf(bufferContext);
+            //			if(this.readyState == 2) return;
+            //			throw new Error("Going"+path.commands+"\n"+path.data.join('|'));
+            drawVector(bufferContext, commands, data);
+            bufferContext.endFill();
+            flush();
         }
 
         public function stroke():void
         {
+            setLineStyleOf(bufferContext);
+            //			if(this.readyState == 2) return;
+            drawVector(bufferContext, commands, data);
+            flush();
         }
 
         public function clip():void
@@ -863,11 +944,31 @@ package com.w3canvas.ascanvas.core.impl
             return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
         }
 
+        private static function degreeToRadian(degree:Number):Number
+        {
+            return degree * Math.PI / 180;
+        }
+
+        private static function radianToDegree(radian:Number):Number
+        {
+            return radian * 180 / Math.PI;
+        }
+
+        private function get bufferContext():Graphics
+        {
+            return bufferSprite.graphics;
+        }
+
         //--------------------------------------------------------------------------
         //
         //  Moved from original codebase
         //
         //--------------------------------------------------------------------------
+
+        private function drawVector(g:Graphics, cmds:Vector.<int>, data:Vector.<Number>):void
+        {
+            g.drawPath(cmds, data);
+        }
 
         private function drawCubicBezier_midpoint(P0:Point, P1:Point, P2:Point, P3:Point):void
         {
